@@ -1,0 +1,13 @@
+[Unit]
+Description=hsrv Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/sbin/hsrv
+Restart=on-abort
+
+
+[Install]
+WantedBy=multi-user.target
