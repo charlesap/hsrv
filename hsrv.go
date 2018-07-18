@@ -66,21 +66,21 @@ func myHandler(w http.ResponseWriter, r *http.Request) {
 
 	lp := len(r.URL.Path)
 	if lp > 10 && r.URL.Path[1:11] == "wp-content" {
-		http.ServeFile(w, r, "/srv/www/"+r.TLS.ServerName+"/public_html/"+r.URL.Path[1:])
+		http.ServeFile(w, r, "/var/www/"+r.TLS.ServerName+"/html/"+r.URL.Path[1:])
 	} else if lp > 11 && r.URL.Path[1:] == "status.html" {
-		http.ServeFile(w, r, "/srv/www/"+r.TLS.ServerName+"/public_html/"+r.URL.Path[1:])
+		http.ServeFile(w, r, "/var/www/"+r.TLS.ServerName+"/html/"+r.URL.Path[1:])
 	} else if lp > 10 && r.URL.Path[1:11] == "robots.txt" {
 
 	} else if lp > 6 && (r.URL.Path[lp-4:] == ".png" || r.URL.Path[lp-5:] == ".jpeg" || r.URL.Path[lp-5:] == ".json") {
-		http.ServeFile(w, r, "/srv/www/"+r.TLS.ServerName+"/public_html/"+r.URL.Path[1:])
+		http.ServeFile(w, r, "/var/www/"+r.TLS.ServerName+"/html/"+r.URL.Path[1:])
 	} else {
-                http.ServeFile(w, r, "/srv/www/"+r.TLS.ServerName+"/public_html/index.html")
+                http.ServeFile(w, r, "/var/www/"+r.TLS.ServerName+"/html/index.html")
 	}
 
 	finishTime := time.Now()
 	record.time = finishTime.UTC()
 	record.elapsedTime = finishTime.Sub(startTime)
-        log, err := os.OpenFile("/srv/www/logs/gohttpd.log", os.O_RDWR|os.O_APPEND, 0666)
+        log, err := os.OpenFile("/var/log/hsrv.log", os.O_RDWR|os.O_APPEND, 0666)
 	record.Log(log)
 	if err != nil {
 	   fmt.Println(err)
@@ -89,24 +89,36 @@ func myHandler(w http.ResponseWriter, r *http.Request) {
 	log.Close()
 }
 
+func redirect(w http.ResponseWriter, req *http.Request) {
+    // remove/add not default ports from req.Host
+    target := "https://" + req.Host + req.URL.Path 
+    if len(req.URL.RawQuery) > 0 {
+        target += "?" + req.URL.RawQuery
+    }
+//    log.Printf("redirect to: %s", target)
+    http.Redirect(w, req, target,
+            // see @andreiavrammsd comment: often 307 > 301
+            http.StatusTemporaryRedirect)
+}
+
 func main() {
     t := log.Logger{}
     var err error
     tlsConfig := &tls.Config{}
-    tlsConfig.Certificates = make([]tls.Certificate, 3)
+    tlsConfig.Certificates = make([]tls.Certificate, 2)
     // go http server treats the 0'th key as a default fallback key
-    tlsConfig.Certificates[0], err = tls.LoadX509KeyPair("/srv/www/mnes.io.pem", "/srv/www/mnes.io.key.pem")
+    tlsConfig.Certificates[0], err = tls.LoadX509KeyPair("/etc/pki/tls/certs/cluster.crt", "/etc/pki/tls/private/cluster.key")
     if err != nil {
         t.Fatal(err)
     }
-    tlsConfig.Certificates[1], err = tls.LoadX509KeyPair("/srv/www/agiide.com.pem", "/srv/www/agiide.com.key.pem")
+    tlsConfig.Certificates[1], err = tls.LoadX509KeyPair("/etc/pki/tls/certs/localhost.crt", "/etc/pki/tls/private/localhost.key")
     if err != nil {
         t.Fatal(err)
     }
-    tlsConfig.Certificates[2], err = tls.LoadX509KeyPair("/srv/www/kuracali.com.pem", "/srv/www/kuracali.com.key.pem")
-    if err != nil {
-        t.Fatal(err)
-    }
+//    tlsConfig.Certificates[2], err = tls.LoadX509KeyPair("/srv/www/kuracali.com.pem", "/srv/www/kuracali.com.key.pem")
+//    if err != nil {
+//        t.Fatal(err)
+//    }
     tlsConfig.BuildNameToCertificate()
 
     http.HandleFunc("/", myHandler)
@@ -117,8 +129,11 @@ func main() {
         TLSConfig:      tlsConfig,
     }
 
+    go http.ListenAndServe(":80", http.HandlerFunc(redirect))
+
     listener, err := tls.Listen("tcp", ":443", tlsConfig)
     if err != nil {
+        fmt.Println(err)
         t.Fatal(err)
     }
     log.Fatal(server.Serve(listener))
